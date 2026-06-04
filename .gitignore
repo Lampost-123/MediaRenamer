@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Never commit secrets or local config
+*.env
+.env*
+config.json
+*_secret*
+*_key*
+secrets/
+
+# OS
+.DS_Store
+Thumbs.db

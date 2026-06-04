@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MediaRenamer</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+
+  <!-- ── Toolbar ──────────────────────────────────────────── -->
+  <header id="toolbar">
+    <div class="brand">Media<span>Renamer</span></div>
+
+    <button class="btn btn-icon" id="btn-browse" title="Browse for folder">📁</button>
+    <input type="text" id="folder-path" placeholder="Full folder path, e.g. F:\TV\Lost\Season 1" spellcheck="false">
+    <button class="btn btn-primary" id="btn-scan">🔍 Scan</button>
+
+    <div class="toolbar-sep"></div>
+
+    <button class="btn btn-success" id="btn-rename" disabled>▶ Rename</button>
+    <button class="btn" id="btn-undo" disabled title="Undo last rename batch">↩ Undo</button>
+    <div id="watch-indicator" class="hidden"><span class="watch-dot"></span> Watching</div>
+    <button class="btn btn-icon" id="btn-shortcuts" title="Keyboard shortcuts (?)">?</button>
+  </header>
+
+  <!-- ── Main ─────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- File list panel -->
+    <section id="file-panel">
+      <div id="file-panel-header">
+        <!-- Tab bar -->
+        <div class="tab-bar">
+          <button class="tab-btn active" data-tab="files">Files</button>
+          <button class="tab-btn" data-tab="history">History</button>
+        </div>
+        <!-- Files-tab extras -->
+        <span class="count-badge" id="count-badge" style="margin-left:8px;">0 files</span>
+        <label id="select-all-wrap">
+          <input type="checkbox" id="select-all" title="Select / deselect all">
+          <span>All</span>
+        </label>
+      </div>
+
+      <!-- ── Files tab ── -->
+      <div id="files-tab">
+        <div id="file-table-wrap">
+          <div id="empty-state">
+            <div class="empty-icon">🎬</div>
+            <p>Paste a folder path above and click <strong>Scan</strong></p>
+            <p class="text-dim" style="font-size:12px;">TV shows, movies, and more — all renamed automatically</p>
+          </div>
+          <table id="file-table" class="hidden">
+            <thead>
+              <tr>
+                <th></th>
+                <th class="col-orig">Original filename</th>
+                <th class="col-arrow"></th>
+                <th class="col-new">Proposed name</th>
+                <th class="col-status">Status</th>
+                <th class="col-actions"></th>
+              </tr>
+            </thead>
+            <tbody id="file-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── History tab ── -->
+      <div id="history-tab" class="hidden" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+        <div id="history-pane">
+          <div id="history-empty">
+            <div class="empty-icon">🕓</div>
+            <p>No rename history yet</p>
+            <p style="font-size:12px;color:var(--text-muted);">Past renames will appear here with rollback options</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Side panel -->
+    <aside id="side-panel">
+
+      <div id="api-key-banner" class="visible">
+        No TMDB API key set. Get a free key at
+        <a href="https://www.themoviedb.org/settings/api" target="_blank">themoviedb.org</a>
+        then enter it in Settings below.
+      </div>
+
+      <!-- Settings section -->
+      <div class="side-section">
+        <div class="side-section-header">
+          <span class="side-section-title">⚙ Settings</span>
+          <span class="side-section-chevron">›</span>
+        </div>
+        <div class="side-section-body">
+          <div class="field">
+            <label>TMDB API Key</label>
+            <input type="password" id="api-key-input" placeholder="Paste your API key…" autocomplete="off">
+          </div>
+          <div class="field">
+            <label style="display:flex;align-items:center;justify-content:space-between;">
+              TV Show template
+              <button class="btn-help" data-help="tv" title="Show available tokens">?</button>
+            </label>
+            <input type="text" id="tv-template" spellcheck="false">
+          </div>
+          <div class="field">
+            <label style="display:flex;align-items:center;justify-content:space-between;">
+              Movie template
+              <button class="btn-help" data-help="movie" title="Show available tokens">?</button>
+            </label>
+            <input type="text" id="movie-template" spellcheck="false">
+          </div>
+          <div class="field" style="margin-top:4px;">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:500;color:var(--text);">
+              <input type="checkbox" id="chk-nfo" style="accent-color:var(--accent);">
+              Generate .nfo sidecar files
+            </label>
+            <div class="hint">Creates Kodi/Plex/Jellyfin metadata files alongside each renamed video</div>
+          </div>
+          <div class="save-row">
+            <button class="btn btn-primary" id="btn-save-settings">Save</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Skip list section -->
+      <div class="side-section">
+        <div class="side-section-header">
+          <span class="side-section-title">🚫 Skip list</span>
+          <span class="side-section-chevron">›</span>
+        </div>
+        <div class="side-section-body hidden">
+          <div id="skip-list-container" style="max-height:120px;overflow-y:auto;"></div>
+          <div style="margin-top:6px;font-size:11px;color:var(--text-muted);">Right-click any file row to add it. Skipped files are ignored on all future scans.</div>
+        </div>
+      </div>
+
+      <!-- Detail section -->
+      <div class="side-section" style="flex:1;display:flex;flex-direction:column;border-bottom:none;overflow:hidden;">
+        <div class="side-section-header" style="cursor:default;">
+          <span class="side-section-title">🎯 Match Detail</span>
+        </div>
+        <div id="detail-panel" style="flex:1;overflow-y:auto;">
+          <div id="detail-empty">
+            <div style="font-size:32px;opacity:0.3;">👆</div>
+            <span>Click a file to see match details<br>and switch candidates</span>
+          </div>
+          <div id="detail-content" class="hidden"></div>
+        </div>
+      </div>
+
+    </aside>
+  </div>
+
+  <!-- ── Status bar ────────────────────────────────────────── -->
+  <footer id="statusbar">
+    <span id="status-text">Ready — paste a folder path and click Scan</span>
+    <div id="progress-wrap"><div id="progress-bar"></div></div>
+  </footer>
+
+</div>
+
+<!-- ── Drag-drop overlay ─────────────────────────────────── -->
+<div id="drag-overlay">
+  <div class="drag-icon">📁</div>
+  <div>Drop folder here to scan</div>
+  <div style="font-size:13px;font-weight:400;color:var(--text-dim);">or paste path directly into the bar above</div>
+</div>
+
+<!-- ── Keyboard shortcuts panel ──────────────────────────── -->
+<div id="shortcuts-panel" class="hidden">
+  <div style="font-weight:600;color:var(--text);margin-bottom:8px;font-size:12px;">Keyboard shortcuts</div>
+  <div class="shortcut-row"><span>Scan folder</span><kbd>Ctrl+S</kbd></div>
+  <div class="shortcut-row"><span>Rename selected</span><kbd>Ctrl+Enter</kbd></div>
+  <div class="shortcut-row"><span>Undo last batch</span><kbd>Ctrl+Z</kbd></div>
+  <div class="shortcut-row"><span>Browse for folder</span><kbd>Ctrl+O</kbd></div>
+  <div class="shortcut-row"><span>History tab</span><kbd>Ctrl+H</kbd></div>
+  <div class="shortcut-row"><span>Select all rows</span><kbd>Ctrl+A</kbd></div>
+  <div class="shortcut-row"><span>Close / dismiss</span><kbd>Esc</kbd></div>
+</div>
+
+<!-- ── Confirm modal ─────────────────────────────────────── -->
+<div id="modal-overlay">
+  <div class="modal">
+    <h3 id="modal-title"></h3>
+    <p class="modal-subtitle" id="modal-subtitle"></p>
+    <div id="modal-body"></div>
+    <div class="modal-actions">
+      <button class="btn" id="modal-cancel">Cancel</button>
+      <button class="btn btn-success" id="modal-confirm">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
