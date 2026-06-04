@@ -8,6 +8,8 @@ Built for Windows, runs in your browser at `http://127.0.0.1:8765`.
 
 **Fair warning:** this whole thing is AI vibe-coding slop. It was prompted into existence, iterated until it felt right, and shipped without a proper design doc or test suite. It works for the happy path — scan, match, rename, undo — but don't expect elegant architecture, exhaustive edge-case handling, or code that a human would proudly defend in a code review. Treat it like a useful sketch, not production infrastructure. Preview before you rename.
 
+![MediaRenamer scanning Father Ted — 24 files matched and ready to rename](docs/screenshot.png)
+
 ---
 
 ## What it handles
