@@ -14,7 +14,19 @@ app = FastAPI(title="MediaRenamer")
 
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
-app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
+_NO_CACHE = {"Cache-Control": "no-store, no-cache, must-revalidate, max-age=0"}
+
+
+@app.get("/static/{filename}")
+def serve_static(filename: str):
+    """Serve frontend assets with no-cache headers so edits always take effect."""
+    safe = Path(filename).name  # prevent path traversal
+    fpath = FRONTEND_DIR / safe
+    if not fpath.is_file():
+        raise HTTPException(status_code=404, detail="Not found")
+    media = "text/javascript" if safe.endswith(".js") else \
+            "text/css" if safe.endswith(".css") else "application/octet-stream"
+    return FileResponse(str(fpath), media_type=media, headers=_NO_CACHE)
 
 
 @app.on_event("startup")
@@ -176,15 +188,20 @@ def get_template_help():
 
 class CleanupRequest(BaseModel):
     root: str
+    remove_root: bool = False
 
 
 @app.post("/api/cleanup")
 def post_cleanup(body: CleanupRequest):
     from pathlib import Path as _Path
     if not _Path(body.root).is_dir():
-        raise HTTPException(status_code=404, detail=f"Folder not found: {body.root}")
-    deleted = renamer.cleanup_empty_folders(body.root)
-    return {"deleted": deleted, "count": len(deleted)}
+        # Root may already be gone (e.g. renamed away) — that's fine
+        return {"deleted": [], "count": 0}
+    # 1) Remove scene-release junk files (nfo/txt/sample/etc.) anywhere under root
+    junk = renamer.sweep_junk_files(body.root)
+    # 2) Remove the now-empty leftover folders
+    deleted = renamer.cleanup_empty_folders(body.root, remove_root=body.remove_root)
+    return {"deleted": deleted, "count": len(deleted), "junk_removed": len(junk)}
 
 
 class MovieFolderProposalRequest(BaseModel):
@@ -223,11 +240,55 @@ def post_movie_folder_proposals(body: MovieFolderProposalRequest):
     return {"proposals": proposals}
 
 
+class TvRootProposalRequest(BaseModel):
+    scan_root: str
+    show_title: str        # clean TMDB title
+    show_year: str | None = None   # series start year
+
+
+@app.post("/api/tv-root-proposal")
+def post_tv_root_proposal(body: TvRootProposalRequest):
+    """
+    Check whether the scan_root folder itself needs renaming to the clean
+    'Show Title (Year)' form, e.g.
+      'The.Last.Man.On.Earth.S01-S04.1080p...' → 'The Last Man On Earth (2015)'.
+    Returns a folder rename proposal if needed, or null.
+    """
+    from pathlib import Path as _P
+    root  = _P(body.scan_root)
+    clean = templates.sanitize(body.show_title)
+    # Canonical name with year, e.g. "The Last Man On Earth (2015)"
+    proposed_name = templates.tv_show_folder_name(
+        {"title": body.show_title, "year": body.show_year or ""}
+    )
+
+    # Already named exactly right (incl. year) — nothing to do
+    if root.name == proposed_name:
+        return {"proposal": None}
+
+    # Folder is clean but missing the year — propose adding it
+    # OR folder is junk-encoded — propose the clean year-suffixed name
+    if templates._folder_is_show(body.scan_root, clean) or templates._folder_is_junk_show(root.name, clean):
+        return {
+            "proposal": {
+                "id":            body.scan_root,
+                "path":          body.scan_root,
+                "folder":        str(root.parent),
+                "filename":      root.name,
+                "proposed_name": proposed_name,
+                "op_type":       "folder",
+            }
+        }
+
+    return {"proposal": None}
+
+
 # ── Rename (SSE streaming) ─────────────────────────────────────────────────────
 
 class RenameOperation(BaseModel):
     src: str
     dst: str
+    op_type: str = "file"
 
 
 class RenameRequest(BaseModel):

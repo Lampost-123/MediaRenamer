@@ -230,7 +230,6 @@ async function startBulkLookup() {
       state.files.forEach(f => { if (state.matches[f.id]) matchesMap[f.id] = state.matches[f.id]; });
       const mfp = await api.post('/api/movie-folder-proposals', { files: state.files, matches: matchesMap });
       if (mfp.proposals?.length) {
-        // Merge with existing folder proposals, avoiding duplicates
         const existingIds = new Set(state.folders.map(f => f.id));
         mfp.proposals.forEach(p => {
           if (!existingIds.has(p.id)) {
@@ -239,6 +238,41 @@ async function startBulkLookup() {
             state.proposed[p.id] = p.proposed_name;
           }
         });
+      }
+    } catch {}
+
+    // Check whether the scan root itself needs renaming
+    // (e.g. "The.Last.Man.On.Earth.S01-S04.1080p..." → "The Last Man On Earth")
+    try {
+      // Find the most common matched TV show title across all files
+      const titleCounts = {};
+      let dominantYear = '';
+      state.files.forEach(f => {
+        const m = state.matches[f.id];
+        if (m?.type === 'tv' && m?.title) titleCounts[m.title] = (titleCounts[m.title] || 0) + 1;
+      });
+      const dominantTitle = Object.entries(titleCounts).sort((a,b) => b[1]-a[1])[0]?.[0];
+      if (dominantTitle) {
+        // Pull the year from a matched file of that show
+        const yearMatch = state.files.map(f => state.matches[f.id]).find(m => m?.title === dominantTitle && m?.year);
+        dominantYear = yearMatch?.year || '';
+      }
+      if (dominantTitle && state.scanRoot) {
+        const rootProposal = await api.post('/api/tv-root-proposal', {
+          scan_root: state.scanRoot,
+          show_title: dominantTitle,
+          show_year: dominantYear,
+        });
+        if (rootProposal.proposal) {
+          const p = rootProposal.proposal;
+          const existingIds = new Set(state.folders.map(f => f.id));
+          if (!existingIds.has(p.id)) {
+            // Root rename goes FIRST so it executes before Season folders are created
+            state.folders.unshift(p);
+            state.statuses[p.id] = 'folder';
+            state.proposed[p.id] = p.proposed_name;
+          }
+        }
       }
     } catch {}
 
@@ -604,31 +638,31 @@ function getOperations() {
   const folderMap = {};
   folderOps.forEach(op => { folderMap[op.src] = op.dst; });
 
+  // Remap a path through folderMap (a path inside a folder being renamed
+  // gets its prefix swapped to the new folder name). Used for BOTH src and dst
+  // so files still resolve after parent folders are renamed first.
+  const remap = (p) => {
+    for (const [oldF, newF] of Object.entries(folderMap)) {
+      if (p === oldF || p.startsWith(oldF + sep)) {
+        return newF + p.slice(oldF.length);
+      }
+    }
+    return p;
+  };
+
   const fileOps = state.files
     .filter(f => rowChecked(f.id) && state.proposed[f.id] && state.statuses[f.id] !== 'done')
-    .filter(f => {
-      const targetFolder = state.proposedFolders[f.id] || f.folder;
-      const renamedFolder = folderMap[targetFolder] || targetFolder;
-      const dst = renamedFolder + sep + state.proposed[f.id];
-      return dst !== f.path; // skip if nothing changes
-    })
     .map(f => {
-      // Use proposed folder; update it if a folder rename covers it
-      let targetFolder = state.proposedFolders[f.id] || f.folder;
-      // If the proposed folder is inside a folder being renamed, update it
-      for (const [oldF, newF] of Object.entries(folderMap)) {
-        if (targetFolder === oldF || targetFolder.startsWith(oldF + sep)) {
-          targetFolder = newF + targetFolder.slice(oldF.length);
-          break;
-        }
-      }
+      const targetFolder = remap(state.proposedFolders[f.id] || f.folder);
       return {
-        src: f.path,
+        src: remap(f.path),                              // src follows any parent-folder rename
         dst: targetFolder + sep + state.proposed[f.id],
         op_type: 'file',
         id: f.id,
+        _origPath: f.path,
       };
-    });
+    })
+    .filter(op => op.dst !== op._origPath && op.dst !== op.src); // skip no-ops
 
   // Subtitle renames: pair each subtitle with its video's proposed destination
   const subtitleOps = [];
@@ -637,19 +671,14 @@ function getOperations() {
     if (!rowChecked(f.id)) return;
     const proposedName = state.proposed[f.id];
     const stem = proposedName.replace(/\.[^.]+$/, ''); // strip ext
-    const targetFolder = (() => {
-      let tf = state.proposedFolders[f.id] || f.folder;
-      for (const [oldF, newF] of Object.entries(folderMap)) {
-        if (tf === oldF || tf.startsWith(oldF + sep)) { tf = newF + tf.slice(oldF.length); break; }
-      }
-      return tf;
-    })();
+    const targetFolder = remap(state.proposedFolders[f.id] || f.folder);
     (f.subtitles || []).forEach(sub => {
       const langSuffix = sub.lang ? `.${sub.lang}` : '';
       const newSubName = `${stem}${langSuffix}${sub.ext}`;
       const dstSub = targetFolder + sep + newSubName;
-      if (dstSub !== sub.path) {
-        subtitleOps.push({ src: sub.path, dst: dstSub, op_type: 'subtitle', id: sub.path });
+      const srcSub = remap(sub.path);
+      if (dstSub !== sub.path && dstSub !== srcSub) {
+        subtitleOps.push({ src: srcSub, dst: dstSub, op_type: 'subtitle', id: sub.path });
       }
     });
   });
@@ -744,9 +773,15 @@ function handleRenameEvent(evt, total) {
       // Update folder path in state so subsequent file rows show correctly
       if (folderEntry && res.status === 'done') {
         folderEntry.path = res.dst;
-        // Update file entries that were inside this folder
+        // If the scan root itself was renamed, follow it so cleanup targets the new path
+        if (state.scanRoot === res.src) state.scanRoot = res.dst;
+        // Update any file/folder entries that lived inside the renamed folder
+        const sep = '\\';
         state.files.forEach(f => {
-          if (f.folder === res.src) { f.folder = res.dst; f.path = res.dst + '\\' + f.filename; }
+          if (f.folder === res.src || f.folder.startsWith(res.src + sep)) {
+            f.folder = res.dst + f.folder.slice(res.src.length);
+            f.path   = f.folder + sep + f.filename;
+          }
         });
       }
     }
@@ -777,8 +812,11 @@ function handleRenameEvent(evt, total) {
     if (state.scanRoot) {
       api.post('/api/cleanup', { root: state.scanRoot })
         .then(d => {
+          const bits = [];
+          if (d.count > 0) bits.push(`${d.count} empty folder${d.count !== 1 ? 's' : ''}`);
+          if (d.junk_removed > 0) bits.push(`${d.junk_removed} junk file${d.junk_removed !== 1 ? 's' : ''}`);
           const msg = `Renamed ${doneCount} item${doneCount !== 1 ? 's' : ''}${errCount > 0 ? `, ${errCount} error${errCount !== 1 ? 's' : ''}` : ''}` +
-            (d.count > 0 ? ` · removed ${d.count} empty folder${d.count !== 1 ? 's' : ''}` : '');
+            (bits.length ? ` · removed ${bits.join(' and ')}` : '');
           setStatus(msg, errCount > 0 ? 'info' : 'success');
         })
         .catch(() => {

@@ -145,7 +145,9 @@ async def lookup_file(file_entry: dict, api_key: str) -> dict:
         if ftype == "movie":
             candidates = await search_movie(client, query, file_entry.get("year"), api_key)
         elif ftype == "tv":
-            candidates = await search_tv(client, query, api_key)
+            cached = await search_tv(client, query, api_key)
+            # Deep-copy so per-file episode_title doesn't mutate the shared cache object
+            candidates = [dict(c) for c in cached]
             if candidates:
                 ep = await get_episode(
                     client,
@@ -156,10 +158,9 @@ async def lookup_file(file_entry: dict, api_key: str) -> dict:
                 )
                 candidates[0]["episode_title"] = ep["episode_title"]
         else:
-            # Try both, merge
             movie_cands = await search_movie(client, query, file_entry.get("year"), api_key)
             tv_cands = await search_tv(client, query, api_key)
-            candidates = movie_cands + tv_cands
+            candidates = [dict(c) for c in (movie_cands + tv_cands)]
 
         return {"candidates": candidates}
 

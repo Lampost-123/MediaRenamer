@@ -147,8 +147,11 @@ def scan_folder(folder: str, recursive: bool = True) -> tuple[list[dict], list[d
         elif ext in SUBTITLE_EXTENSIONS:
             all_subs.setdefault(str(p.parent), []).append(p)
 
-    # Apply skip list
-    raw_video = [p for p in raw_video if not skiplist.is_skipped(str(p))]
+    # Drop sample/preview clips and skip-listed files
+    raw_video = [
+        p for p in raw_video
+        if "sample" not in p.stem.lower() and not skiplist.is_skipped(str(p))
+    ]
 
     folder_counts = Counter(str(p.parent) for p in raw_video)
 
@@ -163,11 +166,18 @@ def scan_folder(folder: str, recursive: bool = True) -> tuple[list[dict], list[d
             "filename": p.name,
             "folder_file_count": folder_counts[str(p.parent)],
             "subtitles": subs,
+            # scan_root is the folder the user pointed at — used as the
+            # definitive base for folder organisation (avoids deep-nesting issues)
+            "scan_root": str(root),
             **parsed,
         }
         if parsed["type"] == "tv":
             entry["show_root"] = _show_root(p)
         files.append(entry)
 
-    folders = detect_folder_proposals(files)
-    return files, folders
+    # Season-folder renames (Season 1 → Season 01) are NOT proposed here:
+    # file moves place episodes directly into the correct "Season XX" folder
+    # and the cleanup pass removes the old empty folders afterwards. This avoids
+    # multi-level folder-rename ordering conflicts. Movie-folder and TV-root
+    # renames are requested separately by the frontend after metadata lookup.
+    return files, []

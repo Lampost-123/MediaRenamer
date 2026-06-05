@@ -123,23 +123,104 @@ def can_undo() -> bool:
     return any(b["status"] == "done" for b in log)
 
 
-def cleanup_empty_folders(root: str) -> list[str]:
-    """Delete empty directories inside root (bottom-up). Returns paths of deleted folders."""
+# Leftover scene-release residue that is safe to delete.
+# NOTE: image files (.jpg/.png/etc.) are intentionally NOT junk — they are often
+# legitimate artwork (poster.jpg, folder.jpg, fanart) used by Plex/Kodi/Jellyfin.
+JUNK_EXTENSIONS = {
+    ".nfo", ".txt", ".sfv", ".md5", ".nzb", ".url", ".par2", ".srr",
+    ".diz", ".lnk", ".exe", ".db", ".rev", ".bat", ".cmd",
+}
+# Tiny preview clips left behind by releases (matched by name)
+SAMPLE_HINT = "sample"
+VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".wmv", ".flv", ".webm", ".m2ts"}
+
+
+def _is_junk_file(p: Path) -> bool:
+    """True if this file is deletable scene-release residue."""
+    ext = p.suffix.lower()
+    if ext in JUNK_EXTENSIONS:
+        return True
+    # Sample preview clips: a video whose name contains "sample"
+    if ext in VIDEO_EXT and SAMPLE_HINT in p.stem.lower():
+        return True
+    return False
+
+
+def sweep_junk_files(root: str) -> list[str]:
+    """Delete junk residue files (.nfo/.txt/sample clips/etc.) anywhere under
+    root, at every level including the root itself. Keeps artwork images.
+    Returns the deleted file paths."""
     root_path = Path(root)
+    if not root_path.is_dir():
+        return []
+    removed = []
+    for p in root_path.rglob("*"):
+        if p.is_file() and _is_junk_file(p):
+            try:
+                p.unlink()
+                removed.append(str(p))
+            except Exception:
+                pass
+    return removed
+
+
+def _try_clear_dir(d: Path, remove_junk: bool) -> bool:
+    """
+    Try to empty and remove directory d. Returns True if it was removed.
+    Removes it when empty, or (with remove_junk) when it contains only junk
+    files and no live sub-directories.
+    """
+    try:
+        entries = list(d.iterdir())
+        if not entries:
+            d.rmdir()
+            return True
+        if remove_junk:
+            files   = [e for e in entries if e.is_file()]
+            subdirs = [e for e in entries if e.is_dir()]
+            if not subdirs and files and all(_is_junk_file(f) for f in files):
+                for f in files:
+                    try:
+                        f.unlink()
+                    except Exception:
+                        pass
+                if not any(d.iterdir()):
+                    d.rmdir()
+                    return True
+    except Exception:
+        pass
+    return False
+
+
+def cleanup_empty_folders(root: str, remove_junk: bool = True, remove_root: bool = False) -> list[str]:
+    """
+    Delete empty directories inside root (bottom-up). When remove_junk is True,
+    a folder containing ONLY junk residue (.nfo/.txt/sample clips/etc.) is also
+    cleared and removed. When remove_root is True, the root folder itself is
+    removed too if it ends up empty/junk-only (used when an abandoned junk
+    release folder should be deleted after its media was moved out).
+    Returns paths of deleted folders.
+    """
+    root_path = Path(root)
+    if not root_path.is_dir():
+        return []
     deleted = []
-    # Sort deepest first so parent directories are deleted after their children
+    # Deepest first so children are processed before parents
     dirs = sorted(
         (p for p in root_path.rglob("*") if p.is_dir()),
         key=lambda p: len(p.parts),
         reverse=True,
     )
     for d in dirs:
-        try:
-            if d != root_path and not any(d.iterdir()):
-                d.rmdir()
-                deleted.append(str(d))
-        except Exception:
-            pass
+        if d == root_path:
+            continue
+        if _try_clear_dir(d, remove_junk):
+            deleted.append(str(d))
+
+    # Finally, optionally remove the root itself
+    if remove_root and _try_clear_dir(root_path, remove_junk):
+        deleted.append(str(root_path))
+
     return deleted
 
 
