@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MediaRenamer</title>
-  <link rel="stylesheet" href="/static/style.css?v=10">
+  <link rel="stylesheet" href="/static/style.css?v=8">
 </head>
 <body>
 <div id="app">
@@ -13,8 +13,7 @@
   <header id="toolbar">
     <div class="brand">Media<span>Renamer</span></div>
 
-    <button class="btn btn-icon" id="btn-browse-page" title="Browse folders on this page">🗂️</button>
-    <button class="btn btn-icon" id="btn-browse" title="Open native folder picker">📁</button>
+    <button class="btn btn-icon" id="btn-browse" title="Browse for folder">📁</button>
     <input type="text" id="folder-path" placeholder="Full folder path, e.g. F:\TV\Lost\Season 1" spellcheck="false">
     <button class="btn btn-primary" id="btn-scan">🔍 Scan</button>
 
@@ -165,28 +164,6 @@
 
 </div>
 
-<!-- ── In-page folder browser ────────────────────────────── -->
-<div id="folder-browser-overlay">
-  <div id="folder-browser">
-    <div class="fb-header">
-      <span class="fb-title">🗂️ Select a folder</span>
-      <button class="fb-close" id="fb-close" title="Close">✕</button>
-    </div>
-    <div class="fb-pathbar">
-      <button class="btn fb-up" id="fb-up" title="Up one level">↑</button>
-      <span class="fb-current" id="fb-current">This PC</span>
-    </div>
-    <div class="fb-list" id="fb-list"></div>
-    <div class="fb-footer">
-      <span class="fb-selected" id="fb-selected"></span>
-      <div class="fb-actions">
-        <button class="btn" id="fb-cancel">Cancel</button>
-        <button class="btn btn-success" id="fb-select" disabled>Select this folder</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <!-- ── Drag-drop overlay ─────────────────────────────────── -->
 <div id="drag-overlay">
   <div class="drag-icon">📁</div>
@@ -219,6 +196,6 @@
   </div>
 </div>
 
-<script src="/static/app.js?v=10"></script>
+<script src="/static/app.js?v=8"></script>
 </body>
 </html>

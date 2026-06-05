@@ -96,54 +96,6 @@ async def browse_folder():
     return {"path": path}
 
 
-@app.get("/api/list-dirs")
-def list_dirs(path: str = ""):
-    """
-    List sub-directories of `path` for the in-page folder browser.
-    When `path` is empty, returns the available drive roots (Windows) or '/'.
-    Also reports how many media files sit directly in the folder.
-    """
-    import string
-    from pathlib import Path as _Path
-
-    # No path → list drive letters (Windows) or filesystem root
-    if not path:
-        drives = []
-        for letter in string.ascii_uppercase:
-            d = f"{letter}:\\"
-            if _Path(d).exists():
-                drives.append({"name": d, "path": d, "media_count": 0})
-        if not drives:  # non-Windows fallback
-            drives = [{"name": "/", "path": "/", "media_count": 0}]
-        return {"path": "", "parent": None, "dirs": drives, "is_root": True}
-
-    p = _Path(path)
-    if not p.is_dir():
-        raise HTTPException(status_code=404, detail=f"Folder not found: {path}")
-
-    dirs = []
-    media_here = 0
-    try:
-        for child in sorted(p.iterdir(), key=lambda c: c.name.lower()):
-            try:
-                if child.is_dir():
-                    # Count media files directly inside (cheap, non-recursive)
-                    count = sum(
-                        1 for f in child.iterdir()
-                        if f.is_file() and f.suffix.lower() in scanner.MEDIA_EXTENSIONS
-                    )
-                    dirs.append({"name": child.name, "path": str(child), "media_count": count})
-                elif child.is_file() and child.suffix.lower() in scanner.MEDIA_EXTENSIONS:
-                    media_here += 1
-            except (PermissionError, OSError):
-                continue
-    except (PermissionError, OSError):
-        raise HTTPException(status_code=403, detail=f"Access denied: {path}")
-
-    parent = str(p.parent) if p.parent != p else None
-    return {"path": str(p), "parent": parent, "dirs": dirs, "is_root": False, "media_here": media_here}
-
-
 # ── Scan ──────────────────────────────────────────────────────────────────────
 
 class ScanRequest(BaseModel):

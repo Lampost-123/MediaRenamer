@@ -150,99 +150,6 @@ el.btnBrowse.addEventListener('click', async () => {
   }
 });
 
-/* ── In-page folder browser ───────────────────────────────────────────── */
-const fb = {
-  overlay:  document.getElementById('folder-browser-overlay'),
-  list:     document.getElementById('fb-list'),
-  current:  document.getElementById('fb-current'),
-  selected: document.getElementById('fb-selected'),
-  up:       document.getElementById('fb-up'),
-  selectBtn:document.getElementById('fb-select'),
-  cancel:   document.getElementById('fb-cancel'),
-  close:    document.getElementById('fb-close'),
-  curPath:  '',     // folder currently being listed
-  parent:   null,   // parent of curPath
-  chosen:   '',     // folder the user has highlighted to select
-};
-
-function openFolderBrowser() {
-  fb.overlay.classList.add('visible');
-  // Start at the currently typed path's parent, or the drive list
-  const typed = el.folderPath.value.trim();
-  fbNavigate(typed || '');
-}
-
-function closeFolderBrowser() {
-  fb.overlay.classList.remove('visible');
-}
-
-async function fbNavigate(path, _fallback = true) {
-  fb.list.innerHTML = '<div class="fb-loading">Loading…</div>';
-  fb.chosen = path || '';
-  try {
-    const data = await api.get('/api/list-dirs?path=' + encodeURIComponent(path || ''));
-    fb.curPath = data.path;
-    fb.parent  = data.parent;
-    fb.current.textContent = data.is_root ? 'This PC' : data.path;
-    fb.up.disabled = data.is_root && !data.parent;
-
-    // A real folder (not the drive-root list) can itself be selected
-    if (!data.is_root) {
-      fb.chosen = data.path;
-      fb.selected.textContent = data.path + (data.media_here ? `  (${data.media_here} media files here)` : '');
-      fb.selectBtn.disabled = false;
-    } else {
-      fb.chosen = '';
-      fb.selected.textContent = '';
-      fb.selectBtn.disabled = true;
-    }
-
-    if (data.dirs.length === 0) {
-      fb.list.innerHTML = '<div class="fb-empty">No sub-folders here' +
-        (data.is_root ? '' : ' — you can still select this folder below') + '</div>';
-      return;
-    }
-
-    fb.list.innerHTML = '';
-    data.dirs.forEach(d => {
-      const row = document.createElement('div');
-      row.className = 'fb-item';
-      row.innerHTML = `
-        <span class="fb-icon">${data.is_root ? '💾' : '📁'}</span>
-        <span class="fb-name">${escHtml(d.name)}</span>
-        ${d.media_count ? `<span class="fb-badge">${d.media_count} media</span>` : ''}`;
-      // Single click → highlight + mark as chosen; double click → navigate in
-      row.addEventListener('click', () => {
-        fb.list.querySelectorAll('.fb-item').forEach(r => r.classList.remove('active'));
-        row.classList.add('active');
-        fb.chosen = d.path;
-        fb.selected.textContent = d.path + (d.media_count ? `  (${d.media_count} media files)` : '');
-        fb.selectBtn.disabled = false;
-      });
-      row.addEventListener('dblclick', () => fbNavigate(d.path));
-      fb.list.appendChild(row);
-    });
-  } catch (e) {
-    // Typed/last path no longer exists → fall back to the drive list once
-    if (_fallback && path) { fbNavigate('', false); return; }
-    fb.list.innerHTML = `<div class="fb-empty" style="color:var(--red)">Cannot open: ${escHtml(e.message)}</div>`;
-    fb.selectBtn.disabled = true;
-  }
-}
-
-document.getElementById('btn-browse-page').addEventListener('click', openFolderBrowser);
-fb.up.addEventListener('click', () => { if (fb.parent !== null) fbNavigate(fb.parent); else fbNavigate(''); });
-fb.cancel.addEventListener('click', closeFolderBrowser);
-fb.close.addEventListener('click', closeFolderBrowser);
-fb.overlay.addEventListener('click', e => { if (e.target === fb.overlay) closeFolderBrowser(); });
-fb.selectBtn.addEventListener('click', () => {
-  if (fb.chosen) {
-    el.folderPath.value = fb.chosen;
-    closeFolderBrowser();
-    setStatus('Folder selected — click Scan to continue', 'info');
-  }
-});
-
 /* ── Scan ──────────────────────────────────────────────────── */
 el.btnScan.addEventListener('click', scan);
 el.folderPath.addEventListener('keydown', e => { if (e.key === 'Enter') scan(); });
@@ -1191,7 +1098,6 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     document.getElementById('modal-overlay').classList.remove('visible');
     document.getElementById('shortcuts-panel').classList.add('hidden');
-    document.getElementById('folder-browser-overlay').classList.remove('visible');
     return;
   }
   if (!e.ctrlKey) return;
